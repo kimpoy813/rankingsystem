@@ -1,0 +1,15 @@
+# Render Blueprint — static site, no build step.
+# Deploy: Render Dashboard → New + → Blueprint → pick this repo.
+services:
+  - type: web
+    name: team-building-ranking
+    runtime: static
+    # The site is plain HTML/CSS/JS — nothing to compile.
+    staticPublishPath: ./
+    branch: main
+    autoDeploy: true
+    headers:
+      # Always serve fresh HTML/CSS/JS so score entry picks up updates immediately.
+      - path: /*
+        name: Cache-Control
+        value: no-cache
