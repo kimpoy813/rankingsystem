@@ -5,27 +5,29 @@ dependencies, no backend — three static files. Open `index.html` and you're li
 
 ## Design
 
-Quiet by default so the numbers do the talking:
+Quiet, white and green, so the numbers do the talking:
 
-- Flat surfaces, hairline borders, a single accent colour — no gradients, glows or glass effects.
-- **Light and dark themes** that follow the OS setting automatically.
-- One consistent emphasis rule everywhere: the leader is solid ink, everyone else is accent.
+- White surfaces, hairline borders, a single green accent — no gradients, glows or glass effects.
+- One emphasis rule everywhere: the leader is solid green, everyone else is a soft green tint.
+- Green-family colour dots keep teams distinguishable without breaking the palette.
 - A four-cell summary strip (teams · games · scored · leading) gives the state at a glance.
-- Responsive: ranking moves above the games on narrow screens; touch-sized controls throughout.
+- Responsive: the ranking moves above the games on narrow screens; touch-sized controls.
 - Respects `prefers-reduced-motion`, keeps visible keyboard focus, and labels controls for
   screen readers.
 
 ## Features
 
-- **Flexible setup** — number of groups (2–16) and games (1–30), then rename the teams.
+- **Flexible setup** — number of groups (2–16) and games (1–30).
+- **Teams name themselves** — type a name in Setup, or hit *Clear names* so each team can
+  enter its own name on the spot.
 - **Configurable points per placing** — defaults to `1st = 10`, `2nd = 8`, `3rd = 6`, `4th = 4`…
   Every value is editable, so `10 / 5 / 3` is just as easy.
 - **Per-game scoring** — pick each team's placing from a dropdown; points apply instantly.
   Sharing a place is allowed and flagged with a small "shared" tag.
 - **Live ranking** — totals, progress bars, games played, wins, ties and movement indicators.
-- **Anonymous final stretch** — during the **last 3 games**, team names are replaced by secret
-  codes (e.g. "Golden Otter"). Points and ranks stay visible so the finish is dramatic without
-  revealing who is who. A "Reveal names · 6s" button shows them briefly for the host.
+- **Fully anonymous final stretch** — for the **last 4 games**, every team name is hidden.
+  No codes, no aliases, no hints: rows simply read *Anonymous* with their points and rank, so
+  nobody can tell who is who. *Reveal names · 6s* shows them briefly if the host needs to check.
 - **Presentation mode** — "Present scoreboard" opens a full-screen, projector-friendly
   leaderboard with a trophy on the final reveal.
 - **Auto-save** — everything is stored in `localStorage`; a refresh never loses your scores.
@@ -42,27 +44,29 @@ python3 -m http.server 8000
 
 ## How anonymity works
 
-Anonymity applies to the **final 3 games** of the activity:
+Anonymity applies to the **final 4 games** of the activity:
 
 | Games set | Names hidden from |
 |-----------|-------------------|
-| 6         | game 4 onwards    |
-| 8         | game 6 onwards    |
-| ≤ 3       | game 1 onwards    |
+| 6         | game 3 onwards    |
+| 8         | game 5 onwards    |
+| ≤ 4       | game 1 onwards    |
 
 It switches on as soon as scoring starts in that final stretch, and can be turned off entirely
-with the *Final-stretch anonymity* toggle in Setup.
+with the *Final-stretch anonymity* toggle in Setup. Points, ranks and bars stay visible the whole
+time — only identities disappear.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
 | `index.html` | Page structure — summary, setup, games, live ranking, scoreboard overlay |
-| `styles.css` | Minimal design system, light/dark themes, responsive layout |
+| `styles.css` | White/green design system, responsive layout |
 | `app.js` | State, scoring math, ranking, anonymity logic, persistence |
 
 ## Notes
 
 - Ties are broken by game wins, then top-3 finishes, then name, and are flagged with a `tied` chip.
 - Participants may share the same placing in a game (both get that placing's points).
+- A blank team name shows as *Unnamed group*.
 - To reset between activities, use **Reset**.

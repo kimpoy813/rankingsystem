@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Live ranking and scoring system for team building activities.">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="light">
 <title>Team Building Ranking System</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏆</text></svg>">
 <link rel="stylesheet" href="styles.css">
@@ -87,7 +87,7 @@
           <label class="switch">
             <input type="checkbox" id="anonToggle">
             <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-            <span class="switch-text">Hide names for the last 3 games</span>
+            <span class="switch-text">Hide names for the last 4 games</span>
           </label>
         </div>
 
@@ -96,9 +96,9 @@
       <div class="setup-sub">
         <div class="sub-head">
           <h3>Group names</h3>
-          <button class="btn btn-tiny" id="shuffleAliases" type="button">Shuffle secret codes</button>
+          <button class="btn btn-tiny" id="clearNames" type="button">Clear names</button>
         </div>
-        <p class="hint">The code beside each name is what the scoreboard shows while anonymity is on.</p>
+        <p class="hint">Teams choose their own name — leave a field blank and they can type it in themselves.</p>
         <div class="chip-list" id="groupNameList"></div>
       </div>
 
@@ -138,7 +138,7 @@
           <span class="anon-icon" aria-hidden="true">🕵️</span>
           <div>
             <strong>Anonymous mode</strong>
-            <p>The final 3 games hide team names so the finish stays a surprise.</p>
+            <p>The final 4 games hide every team name, so the finish stays a surprise.</p>
           </div>
         </div>
 
@@ -171,7 +171,7 @@
   </header>
 
   <div class="sb-banner" id="sbBanner" hidden>
-    <span aria-hidden="true">🕵️</span> Anonymous mode — team names are hidden until the final reveal
+    <span aria-hidden="true">🕵️</span> Anonymous mode — no team names until the final reveal
   </div>
 
   <ol class="sb-list" id="sbList"></ol>

@@ -10,19 +10,13 @@
   var MAX_GROUPS = 16;
   var MIN_GAMES = 1;
   var MAX_GAMES = 30;
-  var ANON_WINDOW = 3; // the final N games hide team names
+  var ANON_WINDOW = 4; // the final N games hide team names completely
 
   var COLORS = [
-    "#7c5cff", "#22d3ee", "#ffcf5c", "#ff8a5c", "#34d399", "#fb7185",
-    "#a78bfa", "#38bdf8", "#f472b6", "#a3e635", "#fbbf24", "#2dd4bf",
-    "#818cf8", "#f97316", "#e879f9", "#94a3b8"
-  ];
-
-  var ALIAS_POOL = [
-    "Crimson Fox", "Golden Otter", "Silver Falcon", "Emerald Wolf",
-    "Amber Tiger", "Violet Raven", "Cobalt Shark", "Jade Panther",
-    "Ruby Lynx", "Onyx Cobra", "Coral Dolphin", "Sage Badger",
-    "Copper Hawk", "Indigo Whale", "Pearl Stag", "Scarlet Bison"
+    "#16a34a", "#15803d", "#4d7c0f", "#0f766e",
+    "#22c55e", "#65a30d", "#0d9488", "#3f6212",
+    "#059669", "#84cc16", "#14b8a6", "#166534",
+    "#4ade80", "#a3e635", "#6ee7b7", "#a7f3d0"
   ];
 
   /* ----------------------------- helpers ----------------------------- */
@@ -63,7 +57,6 @@
       groups: [],
       games: [],
       points: [],
-      alias: {},
       anonymousFinal: true,
       revealUntil: 0,
       setupOpen: true
@@ -82,7 +75,6 @@
     }
     while (s.groups.length > n) {
       var removed = s.groups.pop();
-      delete s.alias[removed.id];
       s.games.forEach(function (g) { delete g.results[removed.id]; });
     }
     var auto = autoPoints(n);
@@ -91,7 +83,6 @@
     } else if (s.points.length > n) {
       s.points.length = n;
     }
-    ensureAliases(s);
     return s;
   }
 
@@ -104,25 +95,6 @@
     return s;
   }
 
-  function ensureAliases(s) {
-    var used = Object.keys(s.alias).map(function (k) { return s.alias[k]; });
-    var free = ALIAS_POOL.filter(function (a) { return used.indexOf(a) === -1; });
-    s.groups.forEach(function (g) {
-      if (!s.alias[g.id]) {
-        if (!free.length) free = shuffle(ALIAS_POOL);
-        s.alias[g.id] = free.shift();
-      }
-    });
-    return s;
-  }
-
-  function shuffleAliases() {
-    var pool = shuffle(ALIAS_POOL);
-    state.groups.forEach(function (g, i) { state.alias[g.id] = pool[i % pool.length]; });
-    commit();
-    toast("Secret codes shuffled 🔀");
-  }
-
   function loadState() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
@@ -132,12 +104,11 @@
       var s = parsed;
       s.title = typeof s.title === "string" ? s.title : "Team Building Championship";
       s.points = Array.isArray(s.points) && s.points.length ? s.points : autoPoints(s.groups.length);
-      s.alias = s.alias && typeof s.alias === "object" ? s.alias : {};
       s.anonymousFinal = s.anonymousFinal !== false;
       s.revealUntil = 0;
       s.setupOpen = s.setupOpen !== false;
       s.games.forEach(function (g) { g.results = g.results && typeof g.results === "object" ? g.results : {}; });
-      ensureAliases(s);
+      delete s.alias;
       return s;
     } catch (e) {
       return null;
@@ -226,8 +197,9 @@
   }
 
   function displayName(group) {
-    if (!namesHidden()) return group.name;
-    return state.alias[group.id] || "Secret Team";
+    if (namesHidden()) return "Anonymous";
+    var name = (group.name || "").trim();
+    return name || "Unnamed group";
   }
 
   function revealNames(seconds) {
@@ -239,7 +211,7 @@
     state.revealUntil = Date.now() + seconds * 1000;
     renderLive();
     renderScoreboard();
-    toast("Names revealed for " + seconds + " seconds 👁️");
+    toast("Names revealed for " + seconds + " seconds");
     clearTimeout(revealTimer);
     revealTimer = setTimeout(function () {
       state.revealUntil = 0;
@@ -275,8 +247,7 @@
     $("#groupNameList").innerHTML = state.groups.map(function (g) {
       return '<div class="chip">' +
         '<span class="chip-dot" style="background:' + groupColor(g.id) + ';color:' + groupColor(g.id) + '"></span>' +
-        '<input type="text" maxlength="24" value="' + esc(g.name) + '" data-group-name="' + esc(g.id) + '" aria-label="Group name" spellcheck="false">' +
-        '<span class="chip-alias" title="Anonymous code">🕵️ ' + esc(state.alias[g.id] || "Secret") + '</span>' +
+        '<input type="text" maxlength="24" value="' + esc(g.name) + '" data-group-name="' + esc(g.id) + '" aria-label="Group name" placeholder="Team name" spellcheck="false">' +
         '</div>';
     }).join("");
 
@@ -385,9 +356,7 @@
       return;
     }
     var top = entries[0];
-    leaderEl.textContent = namesHidden()
-      ? "\ud83d\udd75\ufe0f " + (state.alias[top.group.id] || "Hidden")
-      : top.group.name;
+    leaderEl.textContent = displayName(top.group);
   }
 
   function renderLive() {
@@ -415,7 +384,7 @@
         var up = prev > e.rank;
         delta = '<span class="delta ' + (up ? "up" : "down") + '">' + (up ? "\u2191" : "\u2193") + Math.abs(prev - e.rank) + "</span>";
       }
-      var name = hidden ? '<span class="mask">🕵️</span>' + esc(displayName(e.group)) : esc(displayName(e.group));
+      var name = '<span class="' + (hidden ? "is-anonymous" : "") + '">' + esc(displayName(e.group)) + "</span>";
       var pct = max > 0 ? Math.max(e.total > 0 ? 6 : 0, Math.round((e.total / max) * 100)) : 0;
       return '<li class="live-row rank-' + (e.rank <= 3 ? e.rank : "n") + '" style="animation-delay:' + (i * 25) + 'ms">' +
         '<span class="rank-badge">' + e.rank + "</span>" +
@@ -471,7 +440,7 @@
         }).join("") + "</div>";
       }
       var crown = allDone && e.rank === 1 ? ' <span class="crown">🏆</span>' : "";
-      var name = hidden ? '<span class="mask">🕵️</span> ' + esc(displayName(e.group)) : esc(displayName(e.group));
+      var name = '<span class="' + (hidden ? "is-anonymous" : "") + '">' + esc(displayName(e.group)) + "</span>";
       return '<li class="sb-row rank-' + (e.rank <= 3 ? e.rank : "n") + '" style="animation-delay:' + (i * 45) + 'ms">' +
         '<span class="sb-rank">' + e.rank + "</span>" +
         '<div class="sb-main">' +
@@ -502,7 +471,7 @@
     n = clamp(Math.round(n), MIN_GAMES, MAX_GAMES);
     applyGameCount(state, n);
     if (state.anonymousFinal && state.games.length <= ANON_WINDOW) {
-      toast("Heads up: with " + state.games.length + " game(s), anonymity starts right away.");
+      toast("Heads up: with " + state.games.length + " game(s), the whole activity is anonymous.");
     }
     commit();
   }
@@ -555,7 +524,7 @@
       game.results = results;
     });
     commit();
-    toast("Sample scores loaded — " + (namesHidden() ? "names hidden for the final games 🕵️" : "check the standings"));
+    toast(namesHidden() ? "Sample scores loaded — names are hidden" : "Sample scores loaded");
   }
 
   function resetActivity() {
@@ -563,7 +532,7 @@
     state = createState();
     state.setupOpen = true;
     commit();
-    toast("New activity ready ✨");
+    toast("New activity ready");
   }
 
   function toast(msg) {
@@ -610,7 +579,7 @@
     $("#anonToggle").addEventListener("change", function (e) {
       state.anonymousFinal = e.target.checked;
       commit();
-      toast(state.anonymousFinal ? "Anonymity on for the final 3 games 🕵️" : "Anonymity off");
+      toast(state.anonymousFinal ? "Anonymity on for the final 4 games" : "Anonymity off");
     });
 
     $("#toggleSetup").addEventListener("click", function () {
@@ -619,7 +588,12 @@
       renderSetup();
     });
 
-    $("#shuffleAliases").addEventListener("click", shuffleAliases);
+
+    $("#clearNames").addEventListener("click", function () {
+      state.groups.forEach(function (g) { g.name = ""; });
+      commit();
+      toast("Names cleared — teams can enter their own");
+    });
 
     $("#autoPointsBtn").addEventListener("click", function () {
       state.points = autoPoints(state.groups.length);
