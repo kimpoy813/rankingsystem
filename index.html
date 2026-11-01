@@ -27,24 +27,15 @@
 
 <main class="layout">
 
-  <section class="stats" aria-label="Activity summary">
-    <div class="stat">
-      <span class="stat-label">Teams</span>
-      <span class="stat-value" id="statTeams">4</span>
-    </div>
-    <div class="stat">
-      <span class="stat-label">Games</span>
-      <span class="stat-value" id="statGames">6</span>
-    </div>
-    <div class="stat">
-      <span class="stat-label">Scored</span>
-      <span class="stat-value" id="statScored">0 / 6</span>
-    </div>
-    <div class="stat">
-      <span class="stat-label">Leading</span>
-      <span class="stat-value stat-value-name" id="statLeader">—</span>
-    </div>
-  </section>
+  <p class="summary" aria-label="Activity summary">
+    <span><strong id="statTeams">4</strong> teams</span>
+    <span class="summary-sep" aria-hidden="true">·</span>
+    <span><strong id="statGames">6</strong> games</span>
+    <span class="summary-sep" aria-hidden="true">·</span>
+    <span><strong id="statScored">0 / 6</strong> scored</span>
+    <span class="summary-sep" aria-hidden="true">·</span>
+    <span class="summary-lead">Leading <strong id="statLeader">—</strong></span>
+  </p>
 
   <!-- ============ SETUP ============ -->
   <section class="card setup-card">
@@ -119,7 +110,7 @@
     <section class="games-col">
       <div class="section-head">
         <h2>Games</h2>
-        <p class="section-note">Pick a team for each place — a place can only be taken once.</p>
+        <p class="section-note">Pick a team for each place. <span class="kbd-hint"><kbd>↵</kbd> jumps to the next place</span></p>
       </div>
       <div class="games-list" id="gamesList"></div>
     </section>
@@ -178,7 +169,7 @@
 
   <footer class="sb-foot">
     <span id="sbFoot">Points: 1st 10 · 2nd 8 · 3rd 6</span>
-    <span class="sb-foot-hint">Press Esc to exit</span>
+    <span class="sb-foot-hint"><kbd>R</kbd> reveal names · <kbd>Esc</kbd> exit</span>
   </footer>
 </div>
 

@@ -123,6 +123,8 @@
 
   var state = loadState() || createState();
   var prevRanks = {};
+  var expandedGames = {};   // games whose full place list is expanded
+  var VISIBLE_PLACES = 6;   // places shown before the "show all" toggle
   var revealTimer = null;
   var toastTimer = null;
 
@@ -321,6 +323,7 @@
     var done = Object.keys(byPlace).length;
     var total = state.groups.length;
     var complete = done >= total;
+    var expanded = !!expandedGames[game.id];
 
     // One row per place. A team already placed elsewhere is never offered again,
     // so one place can only hold one team and the same team cannot take two places.
@@ -335,11 +338,18 @@
         return '<option value="' + esc(g.id) + '"' + sel + ">" + esc(label) + "</option>";
       }).join("");
 
-      slots += '<div class="slot' + (chosen ? " is-set" : "") + '" data-place="' + p + '">' +
+      // Long activities stay compact: show the first places, keep filled ones visible,
+      // and let the host expand the rest.
+      var hiddenSlot = total > VISIBLE_PLACES && p > VISIBLE_PLACES && !chosen && !expanded;
+      slots += '<div class="slot' + (chosen ? " is-set" : "") + '" data-place="' + p + '"' +
+        (hiddenSlot ? " data-folded=\"1\"" : "") + '>' +
         '<span class="slot-place">' + ordinal(p) + "</span>" +
+        '<span class="slot-pick">' +
+        '<span class="slot-dot" style="background:' + (chosen ? groupColor(chosen.id) : "transparent") + '"></span>' +
         '<select class="team-select" data-game="' + esc(game.id) + '" data-place="' + p + '" ' +
         'aria-label="Team in ' + ordinal(p) + ' place in ' + esc(game.name) + '">' +
         '<option value="">Select team</option>' + options + "</select>" +
+        "</span>" +
         '<span class="slot-pts">' + pointsForPlace(p) + " pts</span>" +
         "</div>";
     }
@@ -365,6 +375,10 @@
       "</header>" +
       (isAnonGame ? '<p class="anon-tag">Final-stretch game · names hidden on the scoreboard</p>' : "") +
       '<div class="slots">' + slots + "</div>" +
+      (total > VISIBLE_PLACES
+        ? '<button class="slots-toggle" type="button" data-expand="' + esc(game.id) + '" aria-expanded="' + expanded + '">' +
+          (expanded ? "Show fewer places" : "Show all " + total + " places") + "</button>"
+        : "") +
       quick +
       '<footer class="game-foot">' +
       '<span class="muted small">' + (complete ? "All places filled" : left + " place" + (left === 1 ? "" : "s") + " left") + "</span>" +
@@ -395,8 +409,9 @@
     renderStats();
     var entries = computeStandings();
     var meta = $("#liveMeta");
-    meta.textContent = gamesScored() + " of " + state.games.length + " games scored · " +
-      (gamesCompleted() === state.games.length ? "final result" : "live");
+    meta.textContent = gamesCompleted() === state.games.length && state.games.length > 0
+      ? "Final result"
+      : (inAnonWindow() ? "Final stretch · names hidden" : "Scoring in progress");
 
     var hidden = namesHidden();
     $("#anonBanner").hidden = !inAnonWindow();
@@ -740,6 +755,26 @@
       save();
     });
 
+    // Enter (or ↓) jumps to the next place in the same game, ↑/Shift+Tab goes back
+    $("#gamesList").addEventListener("keydown", function (e) {
+      var sel = e.target.closest(".team-select");
+      if (!sel) return;
+      var forward = e.key === "Enter" || e.key === "ArrowDown";
+      var back = e.key === "ArrowUp";
+      if (!forward && !back) return;
+      e.preventDefault();
+      var game = sel.dataset.game;
+      var dir = forward ? 1 : -1;
+      // skip places that are folded away in a long list
+      var selects = Array.prototype.slice.call(
+        $("#gamesList").querySelectorAll('.team-select[data-game="' + game + '"]')
+      ).filter(function (el) { return !el.closest("[data-folded]"); });
+      var i = selects.indexOf(sel);
+      var next = selects[i + dir];
+      if (next) next.focus();
+      else if (forward) sel.blur();
+    });
+
     // place -> team selects
     $("#gamesList").addEventListener("change", function (e) {
       var sel = e.target.closest(".team-select");
@@ -749,6 +784,14 @@
 
     // tap a waiting team to fill the next open place
     $("#gamesList").addEventListener("click", function (e) {
+      var expandBtn = e.target.closest("[data-expand]");
+      if (expandBtn) {
+        var gid = expandBtn.dataset.expand;
+        expandedGames[gid] = !expandedGames[gid];
+        refreshGame(gid);
+        return;
+      }
+
       var quickBtn = e.target.closest(".chip-assign");
       if (quickBtn) { quickAssign(quickBtn.dataset.game, quickBtn.dataset.group); return; }
 
@@ -769,6 +812,11 @@
 
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && !$("#scoreboard").hidden) closeScoreboard();
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === "r" || e.key === "R") &&
+          !$("#scoreboard").hidden && inAnonWindow() &&
+          !/^(input|select|textarea)$/i.test(document.activeElement.tagName)) {
+        revealNames(6);
+      }
       if (e.key === "Tab" && !$("#scoreboard").hidden) {
         var focusables = $("#scoreboard").querySelectorAll("button:not([hidden])");
         if (!focusables.length) return;

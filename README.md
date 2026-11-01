@@ -5,15 +5,33 @@ dependencies, no backend — three static files. Open `index.html` and you're li
 
 ## Design
 
-Quiet, white and green, so the numbers do the talking:
+Quiet white paper and one deep green accent, so the numbers do the talking.
 
-- White surfaces, hairline borders, a single green accent — no gradients, glows or glass effects.
-- One emphasis rule everywhere: the leader is solid green, everyone else is a soft green tint.
+| Token | Value | Notes |
+|-------|-------|-------|
+| Paper (page) | `#fafaf7` | warm neutral white, so white cards read as raised |
+| Surface (cards) | `#ffffff` | pure white, hairline `#e9ebe5` borders |
+| Accent | `#0f7b3f` | deep green, 5.35:1 on white |
+| Ink | `#111a14` | 17.8:1 on white |
+
+- Flat surfaces, hairline borders, one accent — no gradients, glows or glass effects.
+- Every text colour is contrast-checked against WCAG AA on every surface it appears on.
+- One emphasis rule everywhere: the leader is solid green, everyone else a soft green tint.
 - Green-family colour dots keep teams distinguishable without breaking the palette.
-- A four-cell summary strip (teams · games · scored · leading) gives the state at a glance.
 - Responsive: the ranking moves above the games on narrow screens; touch-sized controls.
 - Respects `prefers-reduced-motion`, keeps visible keyboard focus, and labels controls for
   screen readers.
+
+### Interface details
+- **One summary line** (teams · games · scored · leading) replaces the old four stat boxes, so the
+  ranking card is the only place that carries the leader.
+- **Assigned places show a team-coloured dot** and a green-tinted select, so a scored game reads
+  at a glance.
+- **Long activities stay compact** — with more than 6 places, the rest fold behind a
+  *Show all N places* toggle; filled places never hide.
+- **Keyboard flow** — `↵` / `↓` jumps to the next place in the same game, `↑` goes back, and in
+  present mode `R` reveals names while `Esc` exits.
+- Present mode advertises those shortcuts in its footer and drops the placement ticks on phones.
 
 ## Features
 
