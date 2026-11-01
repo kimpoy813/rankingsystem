@@ -22,9 +22,13 @@ Quiet, white and green, so the numbers do the talking:
   enter its own name on the spot.
 - **Configurable points per placing** — defaults to `1st = 10`, `2nd = 8`, `3rd = 6`, `4th = 4`…
   Every value is editable, so `10 / 5 / 3` is just as easy.
-- **Per-game scoring** — pick each team's placing from a dropdown; points apply instantly.
-  Sharing a place is allowed and flagged with a small "shared" tag.
-- **Live ranking** — totals, progress bars, games played, wins, ties and movement indicators.
+- **Fast place entry** — each game lists its places (`1st`, `2nd`, `3rd`…) and you pick a team for
+  each one. Focus jumps to the next open place after every pick, and the leftover teams appear as
+  chips you can tap to fill the next free spot, so a game can be scored in a few clicks.
+- **No duplicate places, ever** — a place can only hold one team and a team can only hold one
+  place, so the "two teams in 4th" error is impossible by construction. Picking a team that is
+  already placed elsewhere simply swaps the two teams.
+- **Live ranking** — totals, progress bars, games played, wins and movement indicators.
 - **Fully anonymous final stretch** — for the **last 4 games**, every team name is hidden.
   No codes, no aliases, no hints: rows simply read *Anonymous* with their points and rank, so
   nobody can tell who is who. *Reveal names · 6s* shows them briefly if the host needs to check.
@@ -64,9 +68,17 @@ time — only identities disappear.
 | `styles.css` | White/green design system, responsive layout |
 | `app.js` | State, scoring math, ranking, anonymity logic, persistence |
 
+## Ties
+
+There are **no tie-breakers**. Ranking is purely by total points:
+
+- Equal totals share the same rank number and are marked `tied`, in the same order the groups
+  were created — no hidden win-count or alphabetical rule decides who is "ahead".
+- If the lead is shared, the summary strip says **Tied lead** instead of a team name.
+- Within a single game, ties cannot happen at all: every place is used at most once.
+
 ## Notes
 
-- Ties are broken by game wins, then top-3 finishes, then name, and are flagged with a `tied` chip.
-- Participants may share the same placing in a game (both get that placing's points).
-- A blank team name shows as *Unnamed group*.
+- A blank team name shows as *Unnamed group A*, *Unnamed group B*, … so they stay tellable apart.
+- Old saves that contain two teams in the same place are repaired automatically on load.
 - To reset between activities, use **Reset**.

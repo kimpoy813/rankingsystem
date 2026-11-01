@@ -77,6 +77,7 @@
       var removed = s.groups.pop();
       s.games.forEach(function (g) { delete g.results[removed.id]; });
     }
+    sanitizeResults(s);
     var auto = autoPoints(n);
     if (s.points.length < n) {
       for (var i = s.points.length; i < n; i++) s.points.push(auto[i]);
@@ -109,6 +110,7 @@
       s.setupOpen = s.setupOpen !== false;
       s.games.forEach(function (g) { g.results = g.results && typeof g.results === "object" ? g.results : {}; });
       delete s.alias;
+      sanitizeResults(s);
       return s;
     } catch (e) {
       return null;
@@ -165,17 +167,15 @@
       return { group: g, perGame: perGame, total: total, wins: wins, top3: top3, played: played };
     });
 
-    entries.sort(function (a, b) {
-      return (b.total - a.total) || (b.wins - a.wins) || (b.top3 - a.top3) ||
-        a.group.name.localeCompare(b.group.name);
-    });
+    // Total points only — no tie-breakers. Equal totals share a rank,
+    // and the host decides how to separate them.
+    entries.sort(function (a, b) { return b.total - a.total; });
 
-    var rank = 0, prevKey = null;
+    var rank = 0, prevTotal = null;
     entries.forEach(function (e, i) {
-      var key = e.total + "|" + e.wins + "|" + e.top3;
-      if (key !== prevKey) { rank = i + 1; prevKey = key; }
+      if (e.total !== prevTotal) { rank = i + 1; prevTotal = e.total; }
       e.rank = rank;
-      e.tie = entries.filter(function (o) { return o.rank === e.rank; }).length > 1;
+      e.tie = entries.filter(function (o) { return o.total === e.total; }).length > 1;
     });
 
     return entries;
@@ -196,10 +196,14 @@
     return inAnonWindow() && Date.now() >= state.revealUntil;
   }
 
-  function displayName(group) {
-    if (namesHidden()) return "Anonymous";
+  function entryName(group) {
     var name = (group.name || "").trim();
-    return name || "Unnamed group";
+    var i = state.groups.indexOf(group);
+    return name || "Unnamed group " + letterName(i < 0 ? 0 : i);
+  }
+
+  function displayName(group) {
+    return namesHidden() ? "Anonymous" : entryName(group);
   }
 
   function revealNames(seconds) {
@@ -279,68 +283,94 @@
     return COLORS[idx % COLORS.length];
   }
 
+  function assignedByPlace(game) {
+    var map = {};
+    state.groups.forEach(function (g) {
+      var p = parseInt(game.results[g.id], 10);
+      if (p >= 1 && p <= state.groups.length) map[p] = g;
+    });
+    return map;
+  }
+
   function renderGames() {
     var wrap = $("#gamesList");
     if (!state.games.length) { wrap.innerHTML = ""; return; }
+    wrap.innerHTML = state.games.map(gameCardHTML).join("");
+  }
 
+  // Re-render one game only, so the control the host is using keeps its focus.
+  function refreshGame(gameId, focusPlace) {
+    var game = state.games.find(function (g) { return g.id === gameId; });
+    if (!game) return;
+    var card = $("#gamesList").querySelector('[data-game="' + gameId + '"]');
+    if (!card) { renderGames(); return; }
+    card.outerHTML = gameCardHTML(game, state.games.indexOf(game));
+    if (focusPlace) {
+      var next = $("#gamesList").querySelector('[data-game="' + gameId + '"] .slot[data-place="' + focusPlace + '"] .team-select');
+      if (next) next.focus({ preventScroll: true });
+    }
+  }
+
+  function gameCardHTML(game, gi) {
     var anonStart = anonStartIndex();
-    var places = state.groups.map(function (_, i) { return i + 1; });
+    var isAnonGame = state.anonymousFinal && gi >= anonStart;
+    var byPlace = assignedByPlace(game);
+    var taken = {};
+    Object.keys(byPlace).forEach(function (p) { taken[byPlace[p].id] = true; });
 
-    wrap.innerHTML = state.games.map(function (game, gi) {
-      var isAnonGame = state.anonymousFinal && gi >= anonStart;
-      var done = scoredInGame(game);
-      var complete = done >= state.groups.length;
+    var done = Object.keys(byPlace).length;
+    var total = state.groups.length;
+    var complete = done >= total;
 
-      function optionsFor(selected) {
-        return places.map(function (p) {
-          return '<option value="' + p + '"' + (selected === p ? " selected" : "") + ">" + ordinal(p) + "</option>";
-        }).join("");
-      }
-
-      var placeCounts = {};
-      state.groups.forEach(function (g) {
-        var p = game.results[g.id];
-        if (p) placeCounts[p] = (placeCounts[p] || 0) + 1;
-      });
-
-      var rows = state.groups.map(function (g) {
-        var place = game.results[g.id] || "";
-        var pts = place ? pointsForPlace(place) : 0;
-        var dup = place && placeCounts[place] > 1
-          ? '<span class="dup" title="Another team shares this place">shared</span>'
-          : "";
-        return '<div class="game-row' + (place ? " is-set" : "") + '">' +
-          '<span class="g-name"><span class="row-dot" style="background:' + groupColor(g.id) + '"></span>' +
-          '<span class="g-label">' + esc(g.name) + "</span>" + dup + "</span>" +
-          '<select class="place-select" data-game="' + esc(game.id) + '" data-group="' + esc(g.id) + '" ' +
-          'aria-label="Place for ' + esc(g.name) + ' in ' + esc(game.name) + '">' +
-          '<option value=""' + (place ? "" : " selected") + ">—</option>" +
-          optionsFor(place) +
-          "</select>" +
-          '<span class="g-pts' + (pts ? "" : " is-zero") + '">' + (pts ? pts + " <em>pts</em>" : "\u2014") + "</span>" +
-          "</div>";
+    // One row per place. A team already placed elsewhere is never offered again,
+    // so one place can only hold one team and the same team cannot take two places.
+    var slots = "";
+    for (var p = 1; p <= total; p++) {
+      var chosen = byPlace[p] || null;
+      var options = state.groups.map(function (g) {
+        var held = parseInt(game.results[g.id], 10);
+        var elsewhere = held && held !== p && byPlace[held];
+        var sel = chosen && chosen.id === g.id ? " selected" : "";
+        var label = entryName(g) + (elsewhere ? " · " + ordinal(held) : "");
+        return '<option value="' + esc(g.id) + '"' + sel + ">" + esc(label) + "</option>";
       }).join("");
 
-      var winner = null;
-      state.groups.forEach(function (g) { if (game.results[g.id] === 1) winner = g; });
-      var winnerLabel = !winner
-        ? "Not scored yet"
-        : (isAnonGame && namesHidden() ? "Winner locked in" : esc(winner.name) + " won");
+      slots += '<div class="slot' + (chosen ? " is-set" : "") + '" data-place="' + p + '">' +
+        '<span class="slot-place">' + ordinal(p) + "</span>" +
+        '<select class="team-select" data-game="' + esc(game.id) + '" data-place="' + p + '" ' +
+        'aria-label="Team in ' + ordinal(p) + ' place in ' + esc(game.name) + '">' +
+        '<option value="">Select team</option>' + options + "</select>" +
+        '<span class="slot-pts">' + pointsForPlace(p) + " pts</span>" +
+        "</div>";
+    }
 
-      return '<article class="game-card' + (complete ? " is-complete" : "") + (isAnonGame ? " anon-game" : "") + '" data-game="' + esc(game.id) + '">' +
-        '<header class="game-head">' +
-        '<span class="game-num">' + (gi + 1) + "</span>" +
-        '<input class="game-name-input" type="text" maxlength="40" value="' + esc(game.name) + '" data-game-name="' + esc(game.id) + '" aria-label="Game name" spellcheck="false">' +
-        '<span class="game-progress">' + done + "/" + state.groups.length + "</span>" +
-        "</header>" +
-        (isAnonGame ? '<p class="anon-tag">Final-stretch game · names hidden on the scoreboard</p>' : "") +
-        '<div class="game-rows">' + rows + "</div>" +
-        '<footer class="game-foot">' +
-        '<span class="muted small">' + winnerLabel + "</span>" +
-        '<button class="btn btn-tiny clear-game" type="button" data-clear="' + esc(game.id) + '">Clear</button>' +
-        "</footer>" +
-        "</article>";
-    }).join("");
+    var unassigned = state.groups.filter(function (g) { return !taken[g.id]; });
+    var quick = unassigned.length
+      ? '<div class="unassigned">' +
+          '<span class="unassigned-label">Still to place — tap a team to drop it into the next free spot</span>' +
+          unassigned.map(function (g) {
+            return '<button class="chip-assign" type="button" data-game="' + esc(game.id) + '" data-group="' + esc(g.id) + '">' +
+              '<span class="row-dot" style="background:' + groupColor(g.id) + '"></span>' +
+              '<span class="chip-name">' + esc(entryName(g)) + "</span></button>";
+          }).join("") +
+        "</div>"
+      : "";
+
+    var left = total - done;
+    return '<article class="game-card' + (complete ? " is-complete" : "") + (isAnonGame ? " anon-game" : "") + '" data-game="' + esc(game.id) + '">' +
+      '<header class="game-head">' +
+      '<span class="game-num">' + (gi + 1) + "</span>" +
+      '<input class="game-name-input" type="text" maxlength="40" value="' + esc(game.name) + '" data-game-name="' + esc(game.id) + '" aria-label="Game name" spellcheck="false">' +
+      '<span class="game-progress">' + done + "/" + total + "</span>" +
+      "</header>" +
+      (isAnonGame ? '<p class="anon-tag">Final-stretch game · names hidden on the scoreboard</p>' : "") +
+      '<div class="slots">' + slots + "</div>" +
+      quick +
+      '<footer class="game-foot">' +
+      '<span class="muted small">' + (complete ? "All places filled" : left + " place" + (left === 1 ? "" : "s") + " left") + "</span>" +
+      '<button class="btn btn-tiny clear-game" type="button" data-clear="' + esc(game.id) + '">Clear</button>' +
+      "</footer>" +
+      "</article>";
   }
 
   function renderStats() {
@@ -356,7 +386,9 @@
       return;
     }
     var top = entries[0];
-    leaderEl.textContent = displayName(top.group);
+    var sharedLead = entries.filter(function (e) { return e.total === top.total; }).length > 1;
+    // a shared lead is safe to announce even while names are hidden
+    leaderEl.textContent = sharedLead ? "Tied lead" : displayName(top.group);
   }
 
   function renderLive() {
@@ -395,8 +427,7 @@
         "</div>" +
         '<div class="row-bar"><span style="width:' + pct + '%"></span></div>' +
         '<div class="row-sub">' + delta +
-        "<span>" + e.played + " game" + (e.played === 1 ? "" : "s") + " played</span>" +
-        (e.wins ? "<span>· " + e.wins + " win" + (e.wins === 1 ? "" : "s") + "</span>" : "") +
+        "<span>" + e.played + " of " + state.games.length + " game" + (state.games.length === 1 ? "" : "s") + " scored</span>" +
         (e.tie ? '<span class="tie-flag">tied</span>' : "") +
         "</div></div></li>";
     }).join("");
@@ -476,20 +507,80 @@
     commit();
   }
 
-  function setPlace(gameId, groupId, value) {
+  // Put a team into a place. A place holds one team and a team holds one place,
+  // so a duplicate placing (a tie) can never be created.
+  function setSlotTeam(gameId, place, groupId) {
     var game = state.games.find(function (g) { return g.id === gameId; });
     if (!game) return;
-    var place = value ? clamp(parseInt(value, 10), 1, state.groups.length) : 0;
-    if (place) game.results[groupId] = place;
-    else delete game.results[groupId];
-    commit();
+    place = clamp(parseInt(place, 10), 1, state.groups.length);
+    if (groupId && !state.groups.some(function (g) { return g.id === groupId; })) return;
+
+    var current = assignedByPlace(game)[place] || null;          // who holds this place now
+    var incomingFrom = game.results[groupId] || null;             // where the incoming team was
+
+    state.groups.forEach(function (g) {
+      if (parseInt(game.results[g.id], 10) === place) delete game.results[g.id];
+    });
+
+    if (groupId) {
+      game.results[groupId] = place;
+      // if that team already had a place, the two teams simply swap
+      if (current && current.id !== groupId && incomingFrom) {
+        game.results[current.id] = incomingFrom;
+      }
+    }
+    afterGameChange(gameId, groupId ? nextEmptyPlace(game) : place);
+  }
+
+  function nextEmptyPlace(game) {
+    var byPlace = assignedByPlace(game);
+    for (var p = 1; p <= state.groups.length; p++) {
+      if (!byPlace[p]) return p;
+    }
+    return 0;
+  }
+
+  // Save, then update just the game card + live panel (no flicker, focus stays put).
+  function afterGameChange(gameId, focusPlace) {
+    save();
+    refreshGame(gameId, focusPlace);
+    renderStats();
+    renderLive();
+    renderScoreboard();
+  }
+
+  // Tap-to-fill: drop a team into the first place that is still open.
+  function quickAssign(gameId, groupId) {
+    var game = state.games.find(function (g) { return g.id === gameId; });
+    if (!game) return;
+    var place = nextEmptyPlace(game);
+    if (place) setSlotTeam(gameId, place, groupId);
+  }
+
+  // Repair any legacy data where two teams shared one place.
+  function sanitizeResults(st) {
+    st = st || state;
+    var ids = {};
+    st.groups.forEach(function (g) { ids[g.id] = true; });
+    st.games.forEach(function (game) {
+      var seen = {};
+      Object.keys(game.results).forEach(function (gid) {
+        var p = parseInt(game.results[gid], 10);
+        if (!ids[gid] || !p || p < 1 || p > st.groups.length || seen[p]) {
+          delete game.results[gid];
+          return;
+        }
+        seen[p] = true;
+        game.results[gid] = p;
+      });
+    });
   }
 
   function clearGame(gameId) {
     var game = state.games.find(function (g) { return g.id === gameId; });
     if (!game) return;
     game.results = {};
-    commit();
+    afterGameChange(gameId, 0);
     toast("Game cleared");
   }
 
@@ -609,16 +700,19 @@
       if (!group) return;
       group.name = input.value;
       save();
-      // sync the labels inside the game cards
-      var rows = document.querySelectorAll("#gamesList .game-row");
-      rows.forEach(function (row) {
-        var sel = row.querySelector(".place-select");
-        if (sel && sel.dataset.group === group.id) {
-          var label = row.querySelector(".g-label");
-          if (label) label.textContent = group.name;
-          sel.setAttribute("aria-label", "Place for " + group.name);
-        }
+      // keep the game cards in sync without stealing focus from this field
+      $("#gamesList").querySelectorAll(".team-select").forEach(function (sel) {
+        var opt = sel.querySelector('option[value="' + group.id + '"]');
+        if (!opt) return;
+        var game = state.games.find(function (gm) { return gm.id === sel.dataset.game; });
+        var held = game ? parseInt(game.results[group.id], 10) : 0;
+        var here = parseInt(sel.dataset.place, 10);
+        opt.textContent = entryName(group) + (held && held !== here ? " · " + ordinal(held) : "");
       });
+      $("#gamesList").querySelectorAll('.chip-assign[data-group="' + group.id + '"] .chip-name').forEach(function (el) {
+        el.textContent = entryName(group);
+      });
+      renderStats();
       renderLive();
       renderScoreboard();
     });
@@ -646,18 +740,20 @@
       save();
     });
 
-    // placing selects
+    // place -> team selects
     $("#gamesList").addEventListener("change", function (e) {
-      var sel = e.target.closest(".place-select");
+      var sel = e.target.closest(".team-select");
       if (!sel) return;
-      setPlace(sel.dataset.game, sel.dataset.group, sel.value);
+      setSlotTeam(sel.dataset.game, sel.dataset.place, sel.value || null);
     });
 
-    // clear game
+    // tap a waiting team to fill the next open place
     $("#gamesList").addEventListener("click", function (e) {
+      var quickBtn = e.target.closest(".chip-assign");
+      if (quickBtn) { quickAssign(quickBtn.dataset.game, quickBtn.dataset.group); return; }
+
       var btn = e.target.closest("[data-clear]");
-      if (!btn) return;
-      clearGame(btn.dataset.clear);
+      if (btn) clearGame(btn.dataset.clear);
     });
 
     // reveal
