@@ -46,6 +46,46 @@ python3 -m http.server 8000
 # visit http://localhost:8000
 ```
 
+## Host it on Render (static site)
+
+The repo ships a `render.yaml` blueprint, so Render needs almost no configuration: no build
+command, no environment variables, publish directory is the repo root.
+
+### Option A — Blueprint (recommended, one click)
+
+1. Push this repo to GitHub (already done for `kimpoy813/rankingsystem`).
+2. In the [Render Dashboard](https://dashboard.render.com) choose **New + → Blueprint**.
+3. Pick the repository. Render reads `render.yaml` and shows a **team-building-ranking** service.
+4. Click **Apply**. The first deploy takes under a minute.
+
+`autoDeploy: true` means every push to `main` redeploys automatically.
+
+### Option B — manual Static Site
+
+1. **New + → Static Site**, connect the repository.
+2. Fill in:
+
+   | Field | Value |
+   |-------|-------|
+   | Branch | `main` |
+   | Build Command | *(leave empty — nothing to build)* |
+   | Publish Directory | `.` |
+
+3. **Create Static Site**.
+
+### Notes for either option
+
+- **No SPA rewrite needed.** The app is a single page with relative asset paths and no
+  client-side routing, so `/index.html` resolves every route on its own.
+- You get the free `https://<name>.onrender.com` URL with automatic HTTPS and global CDN caching.
+  Rename the service at any time; add a custom domain under **Settings → Custom Domains**.
+- Static sites on Render's free plan include 100 GB bandwidth/month and are not spun down for
+  inactivity, unlike free web services.
+- Scores live in each browser's `localStorage`, so nothing is stored server-side — hosting is
+  purely file delivery.
+- To serve it yourself instead: `python3 -m http.server 8000` (or any static file server), then
+  visit `http://localhost:8000`.
+
 ## How anonymity works
 
 Anonymity applies to the **final 4 games** of the activity:
