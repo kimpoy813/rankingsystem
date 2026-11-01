@@ -1,0 +1,685 @@
+/* =============================================================
+   Team Building Ranking System
+   Vanilla JS · no build step · state persisted in localStorage
+   ============================================================= */
+(function () {
+  "use strict";
+
+  var STORAGE_KEY = "tb-ranking-system-v1";
+  var MIN_GROUPS = 2;
+  var MAX_GROUPS = 16;
+  var MIN_GAMES = 1;
+  var MAX_GAMES = 30;
+  var ANON_WINDOW = 3; // the final N games hide team names
+
+  var COLORS = [
+    "#7c5cff", "#22d3ee", "#ffcf5c", "#ff8a5c", "#34d399", "#fb7185",
+    "#a78bfa", "#38bdf8", "#f472b6", "#a3e635", "#fbbf24", "#2dd4bf",
+    "#818cf8", "#f97316", "#e879f9", "#94a3b8"
+  ];
+
+  var ALIAS_POOL = [
+    "Crimson Fox", "Golden Otter", "Silver Falcon", "Emerald Wolf",
+    "Amber Tiger", "Violet Raven", "Cobalt Shark", "Jade Panther",
+    "Ruby Lynx", "Onyx Cobra", "Coral Dolphin", "Sage Badger",
+    "Copper Hawk", "Indigo Whale", "Pearl Stag", "Scarlet Bison"
+  ];
+
+  /* ----------------------------- helpers ----------------------------- */
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function esc(str) {
+    return String(str == null ? "" : str).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function clamp(n, min, max) { return Math.min(max, Math.max(min, n)); }
+  function uid() { return Math.random().toString(36).slice(2, 10); }
+  function ordinal(n) {
+    var s = ["th", "st", "nd", "rd"], v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  }
+  function letterName(i) {
+    if (i < 26) return String.fromCharCode(65 + i);
+    return String(i + 1);
+  }
+  function autoPoints(n) {
+    var arr = [];
+    for (var i = 0; i < n; i++) arr.push(Math.max(1, 10 - i * 2));
+    return arr;
+  }
+  function shuffle(arr) {
+    var a = arr.slice();
+    for (var i = a.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+
+  /* ------------------------------ state ------------------------------ */
+  function createState() {
+    var s = {
+      title: "Team Building Championship",
+      groups: [],
+      games: [],
+      points: [],
+      alias: {},
+      anonymousFinal: true,
+      revealUntil: 0,
+      setupOpen: true
+    };
+    applyGroupCount(s, 4);
+    applyGameCount(s, 6);
+    s.points = autoPoints(4);
+    return s;
+  }
+
+  function applyGroupCount(s, n) {
+    n = clamp(n, MIN_GROUPS, MAX_GROUPS);
+    while (s.groups.length < n) {
+      var idx = s.groups.length;
+      s.groups.push({ id: uid(), name: "Group " + letterName(idx) });
+    }
+    while (s.groups.length > n) {
+      var removed = s.groups.pop();
+      delete s.alias[removed.id];
+      s.games.forEach(function (g) { delete g.results[removed.id]; });
+    }
+    var auto = autoPoints(n);
+    if (s.points.length < n) {
+      for (var i = s.points.length; i < n; i++) s.points.push(auto[i]);
+    } else if (s.points.length > n) {
+      s.points.length = n;
+    }
+    ensureAliases(s);
+    return s;
+  }
+
+  function applyGameCount(s, n) {
+    n = clamp(n, MIN_GAMES, MAX_GAMES);
+    while (s.games.length < n) {
+      s.games.push({ id: uid(), name: "Game " + (s.games.length + 1), results: {} });
+    }
+    while (s.games.length > n) s.games.pop();
+    return s;
+  }
+
+  function ensureAliases(s) {
+    var used = Object.keys(s.alias).map(function (k) { return s.alias[k]; });
+    var free = ALIAS_POOL.filter(function (a) { return used.indexOf(a) === -1; });
+    s.groups.forEach(function (g) {
+      if (!s.alias[g.id]) {
+        if (!free.length) free = shuffle(ALIAS_POOL);
+        s.alias[g.id] = free.shift();
+      }
+    });
+    return s;
+  }
+
+  function shuffleAliases() {
+    var pool = shuffle(ALIAS_POOL);
+    state.groups.forEach(function (g, i) { state.alias[g.id] = pool[i % pool.length]; });
+    commit();
+    toast("Secret codes shuffled 🔀");
+  }
+
+  function loadState() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      if (!parsed || !Array.isArray(parsed.groups) || !Array.isArray(parsed.games)) return null;
+      var s = parsed;
+      s.title = typeof s.title === "string" ? s.title : "Team Building Championship";
+      s.points = Array.isArray(s.points) && s.points.length ? s.points : autoPoints(s.groups.length);
+      s.alias = s.alias && typeof s.alias === "object" ? s.alias : {};
+      s.anonymousFinal = s.anonymousFinal !== false;
+      s.revealUntil = 0;
+      s.setupOpen = s.setupOpen !== false;
+      s.games.forEach(function (g) { g.results = g.results && typeof g.results === "object" ? g.results : {}; });
+      ensureAliases(s);
+      return s;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
+  }
+
+  var state = loadState() || createState();
+  var prevRanks = {};
+  var revealTimer = null;
+  var toastTimer = null;
+
+  function commit() { save(); renderAll(); }
+
+  /* ---------------------------- computing ---------------------------- */
+  function pointsForPlace(place) {
+    if (!place) return 0;
+    var arr = state.points;
+    if (!arr.length) return 0;
+    var v = place <= arr.length ? arr[place - 1] : arr[arr.length - 1];
+    v = Number(v);
+    return isNaN(v) ? 0 : v;
+  }
+
+  function scoredInGame(game) {
+    if (!game) return 0;
+    return Object.keys(game.results).filter(function (k) { return game.results[k]; }).length;
+  }
+
+  function gamesScored() {
+    return state.games.filter(function (g) { return scoredInGame(g) > 0; }).length;
+  }
+
+  function gamesCompleted() {
+    return state.games.filter(function (g) { return scoredInGame(g) >= state.groups.length; }).length;
+  }
+
+  function computeStandings() {
+    var entries = state.groups.map(function (g) {
+      var perGame = state.games.map(function (game) {
+        var place = game.results[g.id] || null;
+        return { place: place, points: place ? pointsForPlace(place) : 0, scored: !!place };
+      });
+      var total = 0, wins = 0, top3 = 0, played = 0;
+      perGame.forEach(function (e) {
+        total += e.points;
+        if (e.scored) played++;
+        if (e.place === 1) wins++;
+        if (e.place && e.place <= 3) top3++;
+      });
+      return { group: g, perGame: perGame, total: total, wins: wins, top3: top3, played: played };
+    });
+
+    entries.sort(function (a, b) {
+      return (b.total - a.total) || (b.wins - a.wins) || (b.top3 - a.top3) ||
+        a.group.name.localeCompare(b.group.name);
+    });
+
+    var rank = 0, prevKey = null;
+    entries.forEach(function (e, i) {
+      var key = e.total + "|" + e.wins + "|" + e.top3;
+      if (key !== prevKey) { rank = i + 1; prevKey = key; }
+      e.rank = rank;
+      e.tie = entries.filter(function (o) { return o.rank === e.rank; }).length > 1;
+    });
+
+    return entries;
+  }
+
+  /* --------------------------- anonymity ---------------------------- */
+  function anonStartIndex() {
+    return Math.max(0, state.games.length - ANON_WINDOW);
+  }
+
+  function inAnonWindow() {
+    if (!state.anonymousFinal) return false;
+    if (state.games.length === 0) return false;
+    return gamesScored() >= anonStartIndex();
+  }
+
+  function namesHidden() {
+    return inAnonWindow() && Date.now() >= state.revealUntil;
+  }
+
+  function displayName(group) {
+    if (!namesHidden()) return group.name;
+    return state.alias[group.id] || "Secret Team";
+  }
+
+  function revealNames(seconds) {
+    if (!inAnonWindow()) {
+      toast("Anonymity isn't active right now.");
+      return;
+    }
+    seconds = seconds || 6;
+    state.revealUntil = Date.now() + seconds * 1000;
+    renderLive();
+    renderScoreboard();
+    toast("Names revealed for " + seconds + " seconds 👁️");
+    clearTimeout(revealTimer);
+    revealTimer = setTimeout(function () {
+      state.revealUntil = 0;
+      renderLive();
+      renderScoreboard();
+    }, seconds * 1000);
+  }
+
+  /* ---------------------------- rendering ---------------------------- */
+  function renderAll() {
+    renderTitle();
+    renderSetup();
+    renderGames();
+    renderLive();
+    renderScoreboard();
+  }
+
+  function renderTitle() {
+    $("#brandTitle").textContent = state.title || "Team Building Championship";
+    document.title = (state.title || "Ranking System") + " · Live Rankings";
+    $("#titleInput").value = state.title;
+    $("#sbTitle").textContent = state.title || "Team Building Championship";
+  }
+
+  function renderSetup() {
+    $("#groupCount").value = state.groups.length;
+    $("#gameCount").value = state.games.length;
+    $("#anonToggle").checked = state.anonymousFinal;
+    $("#setupBody").classList.toggle("collapsed", !state.setupOpen);
+    $("#toggleSetup").textContent = state.setupOpen ? "Collapse" : "Expand";
+    $("#toggleSetup").setAttribute("aria-expanded", String(state.setupOpen));
+
+    $("#groupNameList").innerHTML = state.groups.map(function (g) {
+      return '<div class="chip">' +
+        '<span class="chip-dot" style="background:' + groupColor(g.id) + ';color:' + groupColor(g.id) + '"></span>' +
+        '<input type="text" maxlength="24" value="' + esc(g.name) + '" data-group-name="' + esc(g.id) + '" aria-label="Group name" spellcheck="false">' +
+        '<span class="chip-alias" title="Anonymous code">🕵️ ' + esc(state.alias[g.id] || "Secret") + '</span>' +
+        '</div>';
+    }).join("");
+
+    renderPointsEditor();
+  }
+
+  function renderPointsEditor() {
+    var wrap = $("#pointsList");
+    var focusedPlace = null;
+    var active = document.activeElement;
+    if (active && active.dataset && active.dataset.place) focusedPlace = active.dataset.place;
+
+    wrap.innerHTML = state.points.map(function (p, i) {
+      return '<label class="point-item">' +
+        '<span>' + ordinal(i + 1) + '</span>' +
+        '<input type="number" min="0" max="99" step="1" inputmode="numeric" value="' + esc(p) + '" data-place="' + (i + 1) + '" aria-label="Points for ' + ordinal(i + 1) + ' place">' +
+        '</label>';
+    }).join("");
+
+    if (focusedPlace) {
+      var el = wrap.querySelector('[data-place="' + focusedPlace + '"]');
+      if (el) { el.focus(); el.select(); }
+    }
+  }
+
+  function groupColor(id) {
+    var idx = state.groups.findIndex(function (g) { return g.id === id; });
+    if (idx < 0) idx = 0;
+    return COLORS[idx % COLORS.length];
+  }
+
+  function renderGames() {
+    var wrap = $("#gamesList");
+    if (!state.games.length) { wrap.innerHTML = ""; return; }
+
+    var anonStart = anonStartIndex();
+    var places = state.groups.map(function (_, i) { return i + 1; });
+
+    wrap.innerHTML = state.games.map(function (game, gi) {
+      var isAnonGame = state.anonymousFinal && gi >= anonStart;
+      var done = scoredInGame(game);
+      var complete = done >= state.groups.length;
+
+      function optionsFor(selected) {
+        return places.map(function (p) {
+          return '<option value="' + p + '"' + (selected === p ? " selected" : "") + ">" + ordinal(p) + "</option>";
+        }).join("");
+      }
+
+      var rows = state.groups.map(function (g) {
+        var place = game.results[g.id] || "";
+        var pts = place ? pointsForPlace(place) : 0;
+        return '<div class="game-row' + (place ? " is-set" : "") + '">' +
+          '<span class="g-name"><span class="row-dot" style="background:' + groupColor(g.id) + '"></span>' +
+          '<span class="g-label">' + esc(g.name) + "</span></span>" +
+          '<select class="place-select" data-game="' + esc(game.id) + '" data-group="' + esc(g.id) + '" ' +
+          'aria-label="Place for ' + esc(g.name) + ' in ' + esc(game.name) + '">' +
+          '<option value=""' + (place ? "" : " selected") + ">—</option>" +
+          optionsFor(place) +
+          "</select>" +
+          '<span class="g-pts' + (pts ? "" : " is-zero") + '">' + (pts ? "+" + pts : "0") + ' <em>pts</em></span>' +
+          "</div>";
+      }).join("");
+
+      var winner = null;
+      state.groups.forEach(function (g) { if (game.results[g.id] === 1) winner = g; });
+      var winnerLabel = !winner
+        ? "Not scored yet"
+        : (isAnonGame && namesHidden() ? "🥇 Winner locked in" : "🥇 " + esc(winner.name));
+
+      return '<article class="game-card' + (complete ? " is-complete" : "") + (isAnonGame ? " anon-game" : "") + '" data-game="' + esc(game.id) + '">' +
+        '<header class="game-head">' +
+        '<span class="game-num">' + (gi + 1) + "</span>" +
+        '<input class="game-name-input" type="text" maxlength="40" value="' + esc(game.name) + '" data-game-name="' + esc(game.id) + '" aria-label="Game name" spellcheck="false">' +
+        '<span class="game-progress">' + done + "/" + state.groups.length + "</span>" +
+        "</header>" +
+        (isAnonGame ? '<p class="anon-tag">🕵️ Final-stretch game — names hidden on the scoreboard</p>' : "") +
+        '<div class="game-rows">' + rows + "</div>" +
+        '<footer class="game-foot">' +
+        '<span class="muted small">' + winnerLabel + "</span>" +
+        '<button class="btn btn-tiny clear-game" type="button" data-clear="' + esc(game.id) + '">Clear</button>' +
+        "</footer>" +
+        "</article>";
+    }).join("");
+  }
+
+  function renderLive() {
+    var entries = computeStandings();
+    var meta = $("#liveMeta");
+    meta.textContent = gamesScored() + " of " + state.games.length + " games scored · " +
+      (gamesCompleted() === state.games.length ? "final result" : "live");
+
+    var hidden = namesHidden();
+    $("#anonBanner").hidden = !inAnonWindow();
+    $("#revealBtn").hidden = !inAnonWindow();
+
+    if (!entries.length) {
+      $("#liveList").innerHTML = '<li class="empty-state">Add groups to start ranking.</li>';
+      return;
+    }
+
+    var max = Math.max.apply(null, entries.map(function (e) { return e.total; }).concat([1]));
+
+    $("#liveList").innerHTML = entries.map(function (e, i) {
+      var prev = prevRanks[e.group.id];
+      var delta = "";
+      if (typeof prev === "number" && prev !== e.rank) {
+        var up = prev > e.rank;
+        delta = '<span class="delta ' + (up ? "up" : "down") + '">' + (up ? "▲" : "▼") + Math.abs(prev - e.rank) + "</span>";
+      }
+      var name = hidden ? '<span class="mask">🕵️</span>' + esc(displayName(e.group)) : esc(displayName(e.group));
+      var pct = max > 0 ? Math.max(e.total > 0 ? 6 : 0, Math.round((e.total / max) * 100)) : 0;
+      return '<li class="live-row rank-' + (e.rank <= 3 ? e.rank : "n") + '" style="animation-delay:' + (i * 25) + 'ms">' +
+        '<span class="rank-badge">' + e.rank + "</span>" +
+        '<div class="row-main">' +
+        '<div class="row-top">' +
+        '<span class="row-name">' + name + "</span>" +
+        '<span class="row-total">' + e.total + " <em>pts</em></span>" +
+        "</div>" +
+        '<div class="row-bar"><span style="width:' + pct + '%"></span></div>' +
+        '<div class="row-sub">' + delta +
+        "<span>" + e.played + " game" + (e.played === 1 ? "" : "s") + " played</span>" +
+        (e.wins ? "<span>· " + e.wins + " win" + (e.wins === 1 ? "" : "s") + "</span>" : "") +
+        (e.tie ? '<span class="tie-flag">tied</span>' : "") +
+        "</div></div></li>";
+    }).join("");
+
+    prevRanks = {};
+    entries.forEach(function (e) { prevRanks[e.group.id] = e.rank; });
+
+    var legend = state.points.slice(0, 4).map(function (p, i) {
+      return ordinal(i + 1) + " +" + p;
+    }).join(" · ");
+    $("#legendText").textContent = legend + (state.points.length > 4 ? " · …" : "");
+  }
+
+  function renderScoreboard() {
+    if ($("#scoreboard").hidden) return;
+    var entries = computeStandings();
+    var hidden = namesHidden();
+    var allDone = state.games.length > 0 && gamesCompleted() === state.games.length;
+
+    $("#sbKicker").textContent = allDone ? "Final Standings" : "Live Standings";
+    $("#sbStatus").textContent = allDone
+      ? "🏆 All " + state.games.length + " games complete"
+      : gamesScored() + " of " + state.games.length + " games scored";
+    $("#sbBanner").hidden = !inAnonWindow();
+    $("#sbReveal").hidden = !inAnonWindow();
+
+    if (!entries.length) {
+      $("#sbList").innerHTML = '<li class="empty-state">No groups yet.</li>';
+      return;
+    }
+
+    var max = Math.max.apply(null, entries.map(function (e) { return e.total; }).concat([1]));
+
+    $("#sbList").innerHTML = entries.map(function (e, i) {
+      var pct = max > 0 ? Math.max(e.total > 0 ? 5 : 0, Math.round((e.total / max) * 100)) : 0;
+      var dots = "";
+      if (!hidden && state.games.length <= 14) {
+        dots = '<div class="sb-dots">' + e.perGame.map(function (pg) {
+          var cls = pg.place === 1 ? "p1" : pg.place === 2 ? "p2" : pg.place === 3 ? "p3" : pg.place ? "pn" : "";
+          return '<span class="sb-dot ' + cls + '" title="' + (pg.place ? ordinal(pg.place) + " place" : "not scored") + '"></span>';
+        }).join("") + "</div>";
+      }
+      var crown = allDone && e.rank === 1 ? " 🏆" : "";
+      var name = hidden ? '<span class="mask">🕵️</span> ' + esc(displayName(e.group)) : esc(displayName(e.group));
+      return '<li class="sb-row rank-' + (e.rank <= 3 ? e.rank : "n") + '" style="animation-delay:' + (i * 45) + 'ms">' +
+        '<span class="sb-rank">' + e.rank + "</span>" +
+        '<div class="sb-main">' +
+        '<div class="sb-name">' + name + crown + "</div>" +
+        '<div class="sb-bar"><span style="width:' + pct + '%"></span></div>' +
+        dots +
+        "</div>" +
+        '<span class="sb-pts">' + e.total + "<em>pts</em></span>" +
+        "</li>";
+    }).join("");
+
+    var legend = state.points.slice(0, 5).map(function (p, i) {
+      return ordinal(i + 1) + " +" + p;
+    }).join(" · ");
+    $("#sbFoot").textContent = "Points: " + legend + (state.points.length > 5 ? " · …" : "");
+  }
+
+  /* ----------------------------- actions ----------------------------- */
+  function setGroupCount(n) {
+    if (isNaN(n)) return;
+    n = clamp(Math.round(n), MIN_GROUPS, MAX_GROUPS);
+    applyGroupCount(state, n);
+    commit();
+  }
+
+  function setGameCount(n) {
+    if (isNaN(n)) return;
+    n = clamp(Math.round(n), MIN_GAMES, MAX_GAMES);
+    applyGameCount(state, n);
+    if (state.anonymousFinal && state.games.length <= ANON_WINDOW) {
+      toast("Heads up: with " + state.games.length + " game(s), anonymity starts right away.");
+    }
+    commit();
+  }
+
+  function setPlace(gameId, groupId, value) {
+    var game = state.games.find(function (g) { return g.id === gameId; });
+    if (!game) return;
+    var place = value ? clamp(parseInt(value, 10), 1, state.groups.length) : 0;
+    if (place) game.results[groupId] = place;
+    else delete game.results[groupId];
+    commit();
+  }
+
+  function clearGame(gameId) {
+    var game = state.games.find(function (g) { return g.id === gameId; });
+    if (!game) return;
+    game.results = {};
+    commit();
+    toast("Game cleared");
+  }
+
+  function openScoreboard() {
+    $("#scoreboard").hidden = false;
+    document.body.classList.add("sb-open");
+    renderScoreboard();
+    var el = $("#scoreboard");
+    if (el.requestFullscreen) {
+      el.requestFullscreen().catch(function () { /* not allowed, ignore */ });
+    }
+  }
+
+  function closeScoreboard() {
+    $("#scoreboard").hidden = true;
+    document.body.classList.remove("sb-open");
+    if (document.fullscreenElement && document.exitFullscreen) {
+      document.exitFullscreen().catch(function () { /* ignore */ });
+    }
+  }
+
+  function loadDemoScores() {
+    state.games.forEach(function (game) {
+      var order = shuffle(state.groups.map(function (g) { return g.id; }));
+      var results = {};
+      order.forEach(function (gid, i) { results[gid] = i + 1; });
+      game.results = results;
+    });
+    commit();
+    toast("Sample scores loaded — " + (namesHidden() ? "names hidden for the final games 🕵️" : "check the standings"));
+  }
+
+  function resetActivity() {
+    if (!window.confirm("Reset everything? All groups, scores and settings will be cleared.")) return;
+    state = createState();
+    state.setupOpen = true;
+    commit();
+    toast("New activity ready ✨");
+  }
+
+  function toast(msg) {
+    var el = $("#toast");
+    el.textContent = msg;
+    el.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove("show"); }, 2600);
+  }
+
+  /* ------------------------------ events ----------------------------- */
+  function bind() {
+    $("#titleInput").addEventListener("input", function (e) {
+      state.title = e.target.value;
+      $("#brandTitle").textContent = state.title || "Team Building Championship";
+      $("#sbTitle").textContent = state.title || "Team Building Championship";
+      document.title = (state.title || "Ranking System") + " · Live Rankings";
+      save();
+    });
+
+    $("#groupCount").addEventListener("change", function (e) {
+      setGroupCount(parseInt(e.target.value, 10));
+      renderSetup();
+    });
+    $("#gameCount").addEventListener("change", function (e) {
+      setGameCount(parseInt(e.target.value, 10));
+      renderSetup();
+    });
+
+    document.querySelectorAll("[data-step]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var kind = btn.dataset.step;
+        var dir = parseInt(btn.dataset.dir, 10);
+        if (kind === "groups") {
+          setGroupCount(state.groups.length + dir);
+          renderSetup();
+        } else {
+          setGameCount(state.games.length + dir);
+          renderSetup();
+        }
+      });
+    });
+
+    $("#anonToggle").addEventListener("change", function (e) {
+      state.anonymousFinal = e.target.checked;
+      commit();
+      toast(state.anonymousFinal ? "Anonymity on for the final 3 games 🕵️" : "Anonymity off");
+    });
+
+    $("#toggleSetup").addEventListener("click", function () {
+      state.setupOpen = !state.setupOpen;
+      save();
+      renderSetup();
+    });
+
+    $("#shuffleAliases").addEventListener("click", shuffleAliases);
+
+    $("#autoPointsBtn").addEventListener("click", function () {
+      state.points = autoPoints(state.groups.length);
+      commit();
+      toast("Points reset to 10, 8, 6, 4…");
+    });
+
+    // group names (typing)
+    $("#groupNameList").addEventListener("input", function (e) {
+      var input = e.target.closest("[data-group-name]");
+      if (!input) return;
+      var group = state.groups.find(function (g) { return g.id === input.dataset.groupName; });
+      if (!group) return;
+      group.name = input.value;
+      save();
+      // sync the labels inside the game cards
+      var rows = document.querySelectorAll("#gamesList .game-row");
+      rows.forEach(function (row) {
+        var sel = row.querySelector(".place-select");
+        if (sel && sel.dataset.group === group.id) {
+          var label = row.querySelector(".g-label");
+          if (label) label.textContent = group.name;
+          sel.setAttribute("aria-label", "Place for " + group.name);
+        }
+      });
+      renderLive();
+      renderScoreboard();
+    });
+
+    // points (typing)
+    $("#pointsList").addEventListener("input", function (e) {
+      var input = e.target.closest("[data-place]");
+      if (!input) return;
+      var idx = parseInt(input.dataset.place, 10) - 1;
+      var val = clamp(parseInt(input.value, 10) || 0, 0, 99);
+      state.points[idx] = val;
+      save();
+      renderGames();
+      renderLive();
+      renderScoreboard();
+    });
+
+    // game name inputs
+    $("#gamesList").addEventListener("input", function (e) {
+      var input = e.target.closest("[data-game-name]");
+      if (!input) return;
+      var game = state.games.find(function (g) { return g.id === input.dataset.gameName; });
+      if (!game) return;
+      game.name = input.value;
+      save();
+    });
+
+    // placing selects
+    $("#gamesList").addEventListener("change", function (e) {
+      var sel = e.target.closest(".place-select");
+      if (!sel) return;
+      setPlace(sel.dataset.game, sel.dataset.group, sel.value);
+    });
+
+    // clear game
+    $("#gamesList").addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-clear]");
+      if (!btn) return;
+      clearGame(btn.dataset.clear);
+    });
+
+    // reveal
+    $("#revealBtn").addEventListener("click", function () { revealNames(6); });
+    $("#sbReveal").addEventListener("click", function () { revealNames(6); });
+
+    // scoreboard open / close
+    $("#scoreboardBtn").addEventListener("click", openScoreboard);
+    $("#sbClose").addEventListener("click", closeScoreboard);
+
+    $("#demoBtn").addEventListener("click", loadDemoScores);
+    $("#resetBtn").addEventListener("click", resetActivity);
+
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !$("#scoreboard").hidden) closeScoreboard();
+    });
+  }
+
+  /* ------------------------------- boot ------------------------------ */
+  bind();
+  renderAll();
+  save();
+
+  // keep the anonymity clock accurate if a tab sleeps mid-reveal
+  setInterval(function () {
+    if (state.revealUntil && Date.now() >= state.revealUntil) {
+      state.revealUntil = 0;
+      renderLive();
+      renderScoreboard();
+    }
+  }, 1000);
+})();
