@@ -326,18 +326,27 @@
         }).join("");
       }
 
+      var placeCounts = {};
+      state.groups.forEach(function (g) {
+        var p = game.results[g.id];
+        if (p) placeCounts[p] = (placeCounts[p] || 0) + 1;
+      });
+
       var rows = state.groups.map(function (g) {
         var place = game.results[g.id] || "";
         var pts = place ? pointsForPlace(place) : 0;
+        var dup = place && placeCounts[place] > 1
+          ? '<span class="dup" title="Another team shares this place">shared</span>'
+          : "";
         return '<div class="game-row' + (place ? " is-set" : "") + '">' +
           '<span class="g-name"><span class="row-dot" style="background:' + groupColor(g.id) + '"></span>' +
-          '<span class="g-label">' + esc(g.name) + "</span></span>" +
+          '<span class="g-label">' + esc(g.name) + "</span>" + dup + "</span>" +
           '<select class="place-select" data-game="' + esc(game.id) + '" data-group="' + esc(g.id) + '" ' +
           'aria-label="Place for ' + esc(g.name) + ' in ' + esc(game.name) + '">' +
           '<option value=""' + (place ? "" : " selected") + ">—</option>" +
           optionsFor(place) +
           "</select>" +
-          '<span class="g-pts' + (pts ? "" : " is-zero") + '">' + (pts ? "+" + pts : "0") + ' <em>pts</em></span>' +
+          '<span class="g-pts' + (pts ? "" : " is-zero") + '">' + (pts ? pts + " <em>pts</em>" : "\u2014") + "</span>" +
           "</div>";
       }).join("");
 
@@ -345,7 +354,7 @@
       state.groups.forEach(function (g) { if (game.results[g.id] === 1) winner = g; });
       var winnerLabel = !winner
         ? "Not scored yet"
-        : (isAnonGame && namesHidden() ? "🥇 Winner locked in" : "🥇 " + esc(winner.name));
+        : (isAnonGame && namesHidden() ? "Winner locked in" : esc(winner.name) + " won");
 
       return '<article class="game-card' + (complete ? " is-complete" : "") + (isAnonGame ? " anon-game" : "") + '" data-game="' + esc(game.id) + '">' +
         '<header class="game-head">' +
@@ -353,7 +362,7 @@
         '<input class="game-name-input" type="text" maxlength="40" value="' + esc(game.name) + '" data-game-name="' + esc(game.id) + '" aria-label="Game name" spellcheck="false">' +
         '<span class="game-progress">' + done + "/" + state.groups.length + "</span>" +
         "</header>" +
-        (isAnonGame ? '<p class="anon-tag">🕵️ Final-stretch game — names hidden on the scoreboard</p>' : "") +
+        (isAnonGame ? '<p class="anon-tag">Final-stretch game · names hidden on the scoreboard</p>' : "") +
         '<div class="game-rows">' + rows + "</div>" +
         '<footer class="game-foot">' +
         '<span class="muted small">' + winnerLabel + "</span>" +
@@ -363,7 +372,26 @@
     }).join("");
   }
 
+  function renderStats() {
+    var entries = computeStandings();
+    var scored = gamesScored() > 0;
+    $("#statTeams").textContent = state.groups.length;
+    $("#statGames").textContent = state.games.length;
+    $("#statScored").textContent = gamesScored() + " / " + state.games.length;
+
+    var leaderEl = $("#statLeader");
+    if (!entries.length || !scored || entries[0].total <= 0) {
+      leaderEl.textContent = "\u2014";
+      return;
+    }
+    var top = entries[0];
+    leaderEl.textContent = namesHidden()
+      ? "\ud83d\udd75\ufe0f " + (state.alias[top.group.id] || "Hidden")
+      : top.group.name;
+  }
+
   function renderLive() {
+    renderStats();
     var entries = computeStandings();
     var meta = $("#liveMeta");
     meta.textContent = gamesScored() + " of " + state.games.length + " games scored · " +
@@ -374,7 +402,7 @@
     $("#revealBtn").hidden = !inAnonWindow();
 
     if (!entries.length) {
-      $("#liveList").innerHTML = '<li class="empty-state">Add groups to start ranking.</li>';
+      $("#liveList").innerHTML = '<li class="empty-state">Add at least one group to see the ranking.</li>';
       return;
     }
 
@@ -385,7 +413,7 @@
       var delta = "";
       if (typeof prev === "number" && prev !== e.rank) {
         var up = prev > e.rank;
-        delta = '<span class="delta ' + (up ? "up" : "down") + '">' + (up ? "▲" : "▼") + Math.abs(prev - e.rank) + "</span>";
+        delta = '<span class="delta ' + (up ? "up" : "down") + '">' + (up ? "\u2191" : "\u2193") + Math.abs(prev - e.rank) + "</span>";
       }
       var name = hidden ? '<span class="mask">🕵️</span>' + esc(displayName(e.group)) : esc(displayName(e.group));
       var pct = max > 0 ? Math.max(e.total > 0 ? 6 : 0, Math.round((e.total / max) * 100)) : 0;
@@ -419,9 +447,9 @@
     var hidden = namesHidden();
     var allDone = state.games.length > 0 && gamesCompleted() === state.games.length;
 
-    $("#sbKicker").textContent = allDone ? "Final Standings" : "Live Standings";
+    $("#sbKicker").textContent = allDone ? "Final standings" : "Live standings";
     $("#sbStatus").textContent = allDone
-      ? "🏆 All " + state.games.length + " games complete"
+      ? "All " + state.games.length + " games complete"
       : gamesScored() + " of " + state.games.length + " games scored";
     $("#sbBanner").hidden = !inAnonWindow();
     $("#sbReveal").hidden = !inAnonWindow();
@@ -442,7 +470,7 @@
           return '<span class="sb-dot ' + cls + '" title="' + (pg.place ? ordinal(pg.place) + " place" : "not scored") + '"></span>';
         }).join("") + "</div>";
       }
-      var crown = allDone && e.rank === 1 ? " 🏆" : "";
+      var crown = allDone && e.rank === 1 ? ' <span class="crown">🏆</span>' : "";
       var name = hidden ? '<span class="mask">🕵️</span> ' + esc(displayName(e.group)) : esc(displayName(e.group));
       return '<li class="sb-row rank-' + (e.rank <= 3 ? e.rank : "n") + '" style="animation-delay:' + (i * 45) + 'ms">' +
         '<span class="sb-rank">' + e.rank + "</span>" +
@@ -496,10 +524,14 @@
     toast("Game cleared");
   }
 
+  var lastFocused = null;
+
   function openScoreboard() {
+    lastFocused = document.activeElement;
     $("#scoreboard").hidden = false;
     document.body.classList.add("sb-open");
     renderScoreboard();
+    $("#sbClose").focus({ preventScroll: true });
     var el = $("#scoreboard");
     if (el.requestFullscreen) {
       el.requestFullscreen().catch(function () { /* not allowed, ignore */ });
@@ -509,6 +541,7 @@
   function closeScoreboard() {
     $("#scoreboard").hidden = true;
     document.body.classList.remove("sb-open");
+    if (lastFocused && lastFocused.focus) lastFocused.focus({ preventScroll: true });
     if (document.fullscreenElement && document.exitFullscreen) {
       document.exitFullscreen().catch(function () { /* ignore */ });
     }
@@ -666,6 +699,13 @@
 
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && !$("#scoreboard").hidden) closeScoreboard();
+      if (e.key === "Tab" && !$("#scoreboard").hidden) {
+        var focusables = $("#scoreboard").querySelectorAll("button:not([hidden])");
+        if (!focusables.length) return;
+        var first = focusables[0], last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
     });
   }
 
