@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Live ranking and scoring system for team building activities.">
+<meta name="color-scheme" content="light">
+<title>Team Building Ranking System</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏆</text></svg>">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">🏆</span>
+    <div class="brand-text">
+      <h1 id="brandTitle">Team Building Championship</h1>
+      <p class="brand-sub">Live ranking &amp; scoring</p>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <button class="btn btn-ghost" id="resetBtn" type="button">Reset</button>
+    <button class="btn btn-primary" id="scoreboardBtn" type="button">Present scoreboard</button>
+  </div>
+</header>
+
+<main class="layout">
+
+  <section class="stats" aria-label="Activity summary">
+    <div class="stat">
+      <span class="stat-label">Teams</span>
+      <span class="stat-value" id="statTeams">4</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Games</span>
+      <span class="stat-value" id="statGames">6</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Scored</span>
+      <span class="stat-value" id="statScored">0 / 6</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Leading</span>
+      <span class="stat-value stat-value-name" id="statLeader">—</span>
+    </div>
+  </section>
+
+  <!-- ============ SETUP ============ -->
+  <section class="card setup-card">
+    <div class="card-head">
+      <h2>Setup</h2>
+      <div class="head-actions">
+        <button class="btn btn-tiny" id="demoBtn" type="button">Demo data</button>
+        <button class="btn btn-tiny" id="toggleSetup" type="button" aria-expanded="true">Collapse</button>
+      </div>
+    </div>
+
+    <div class="setup-body" id="setupBody">
+      <div class="setup-grid">
+
+        <div class="field field-wide">
+          <label for="titleInput">Activity title</label>
+          <input id="titleInput" type="text" maxlength="48" spellcheck="false" autocomplete="off">
+        </div>
+
+        <div class="field">
+          <label for="groupCount">Groups</label>
+          <div class="stepper">
+            <button type="button" data-step="groups" data-dir="-1" aria-label="Remove a group">−</button>
+            <input id="groupCount" type="number" min="2" max="16" step="1" inputmode="numeric">
+            <button type="button" data-step="groups" data-dir="1" aria-label="Add a group">+</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="gameCount">Games</label>
+          <div class="stepper">
+            <button type="button" data-step="games" data-dir="-1" aria-label="Remove a game">−</button>
+            <input id="gameCount" type="number" min="1" max="30" step="1" inputmode="numeric">
+            <button type="button" data-step="games" data-dir="1" aria-label="Add a game">+</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Final-stretch anonymity</label>
+          <label class="switch">
+            <input type="checkbox" id="anonToggle">
+            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+            <span class="switch-text">Hide names for the last 4 games</span>
+          </label>
+        </div>
+
+      </div>
+
+      <div class="setup-sub">
+        <div class="sub-head">
+          <h3>Group names</h3>
+          <button class="btn btn-tiny" id="clearNames" type="button">Clear names</button>
+        </div>
+        <p class="hint">Teams choose their own name — leave a field blank and they can type it in themselves.</p>
+        <div class="chip-list" id="groupNameList"></div>
+      </div>
+
+      <div class="setup-sub">
+        <div class="sub-head">
+          <h3>Points per placing</h3>
+          <button class="btn btn-tiny" id="autoPointsBtn" type="button">Reset to 10, 8, 6…</button>
+        </div>
+        <p class="hint">1st = 10, 2nd = 8, 3rd = 6 by default. Every value is editable, and no two teams can share a place.</p>
+        <div class="points-grid" id="pointsList"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ MAIN ============ -->
+  <div class="main-grid">
+
+    <section class="games-col">
+      <div class="section-head">
+        <h2>Games</h2>
+        <p class="section-note">Pick a team for each place — a place can only be taken once.</p>
+      </div>
+      <div class="games-list" id="gamesList"></div>
+    </section>
+
+    <aside class="live-col">
+      <section class="card live-card" id="liveCard">
+        <div class="live-head">
+          <div>
+            <h2>Live ranking</h2>
+            <p class="muted small" id="liveMeta" aria-live="polite">0 of 6 games scored</p>
+          </div>
+          <span class="live-pill"><span class="pulse-dot" aria-hidden="true"></span>Live</span>
+        </div>
+
+        <div class="anon-banner" id="anonBanner" hidden>
+          <span class="anon-icon" aria-hidden="true">🕵️</span>
+          <div>
+            <strong>Anonymous mode</strong>
+            <p>The final 4 games hide every team name, so the finish stays a surprise.</p>
+          </div>
+        </div>
+
+        <ol class="live-list" id="liveList"></ol>
+
+        <div class="live-foot">
+          <span class="legend" id="legendText">1st +10 · 2nd +8 · 3rd +6</span>
+          <button class="btn btn-tiny" id="revealBtn" type="button" hidden>Reveal names · 6s</button>
+        </div>
+      </section>
+
+      <p class="footnote">Scores save automatically in this browser.</p>
+    </aside>
+
+  </div>
+</main>
+
+<!-- ============ PRESENTATION SCOREBOARD ============ -->
+<div class="scoreboard" id="scoreboard" role="dialog" aria-modal="true" aria-label="Live scoreboard" hidden>
+  <header class="sb-head">
+    <div>
+      <p class="sb-kicker" id="sbKicker">Live standings</p>
+      <h2 id="sbTitle">Team Building Championship</h2>
+    </div>
+    <div class="sb-head-right">
+      <span class="sb-status" id="sbStatus">0 of 6 games scored</span>
+      <button class="btn btn-tiny" id="sbReveal" type="button" hidden>Reveal names · 6s</button>
+      <button class="btn btn-icon" id="sbClose" type="button" aria-label="Close scoreboard">✕</button>
+    </div>
+  </header>
+
+  <div class="sb-banner" id="sbBanner" hidden>
+    <span aria-hidden="true">🕵️</span> Anonymous mode — no team names until the final reveal
+  </div>
+
+  <ol class="sb-list" id="sbList"></ol>
+
+  <footer class="sb-foot">
+    <span id="sbFoot">Points: 1st 10 · 2nd 8 · 3rd 6</span>
+    <span class="sb-foot-hint">Press Esc to exit</span>
+  </footer>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
